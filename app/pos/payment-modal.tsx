@@ -15,12 +15,13 @@ interface PaymentModalProps {
     onClose: () => void;
     totalAmount: number;
     onConfirm: () => void;
+    selectedCustomer: { id: string, name: string } | null;
 }
 
 import { formatRupiah } from "@/lib/utils";
 import { checkoutAction } from "@/actions/checkout";
 
-export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm }: PaymentModalProps) {
+export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, selectedCustomer }: PaymentModalProps) {
     const { items } = useCartStore();
     const [paymentMethod, setPaymentMethod] = useState<'tunai' | 'kartu' | 'qris'>('tunai');
     const [amountTendered, setAmountTendered] = useState<number>(0);
@@ -88,7 +89,7 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm }: Paymen
                 price: i.price
             }));
 
-            const result = await checkoutAction(checkoutItems, totalAmount, paymentMethod);
+            const result = await checkoutAction(checkoutItems, totalAmount, paymentMethod, selectedCustomer?.id);
 
             if (result.success) {
                 setIsSuccess(true);
@@ -166,7 +167,7 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm }: Paymen
                                 <div className="mt-6 pt-6 border-t border-white/10 space-y-2">
                                     <div className="flex justify-between text-sm">
                                         <span className="text-muted-foreground">Pelanggan</span>
-                                        <span className="font-medium">Walk-in</span>
+                                        <span className="font-medium">{selectedCustomer ? selectedCustomer.name : 'Walk-in'}</span>
                                     </div>
                                     <div className="flex justify-between text-sm">
                                         <span className="text-muted-foreground">Order ID</span>

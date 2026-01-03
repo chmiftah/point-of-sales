@@ -18,7 +18,8 @@ interface CheckoutResult {
 export async function checkoutAction(
     items: CheckoutItem[],
     totalAmount: number,
-    paymentMethod: string
+    paymentMethod: string,
+    customerId?: string
 ): Promise<CheckoutResult> {
     const supabase = await createClient();
 
@@ -73,6 +74,7 @@ export async function checkoutAction(
             .insert({
                 tenant_id: tenant_id,
                 outlet_id: outlet_id,
+                customer_id: customerId || null,
                 total_amount: totalAmount,
                 payment_method: paymentMethod,
                 status: 'completed'

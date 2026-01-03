@@ -8,62 +8,82 @@ interface Category {
     name: string;
 }
 
-export default async function POSPage() {
+export default async function POSPage({
+    searchParams
+}: {
+    searchParams: Promise<{ outletId?: string }>
+}) {
     const supabase = await createClient();
 
     // 1. Get User Context (Strict)
-    // We need the outlet_id to fetch the correct stocks.
     const { data: { user } } = await supabase.auth.getUser();
+
+    // Auth Guard
+    if (!user) {
+        // Redirect to login or show error?
+        // Since this is a server comp, maybe simple return for now or let middleware handle it.
+        return <div>Unauthorized. Please Login.</div>;
+    }
+
     let userProfile = null;
     let outletId: string | null = null;
     let tenantId: string | null = null;
+    let isOwner = false;
 
-    if (user) {
-        const { data: profile } = await supabase
-            .from('profiles')
-            .select('full_name, role, outlet_id, tenant_id')
-            .eq('id', user.id)
-            .single();
+    // Fetch Profile
+    const { data: profile } = await supabase
+        .from('profiles')
+        .select('full_name, role, outlet_id, tenant_id')
+        .eq('id', user.id)
+        .single();
 
-        tenantId = profile?.tenant_id || null;
+    tenantId = profile?.tenant_id || null;
+    if (!tenantId) return <div>No Tenant Found</div>;
 
-        userProfile = {
-            name: profile?.full_name || user.user_metadata?.full_name || 'Cashier',
-            email: user.email,
-            role: profile?.role || user.user_metadata?.role || 'Staff'
-        };
+    outletId = profile?.outlet_id; // Assigned outlet
+    isOwner = profile?.role === 'owner'; // Check role
 
-        // If no outlet_id in profile (e.g. Owner), we might default to first outlet or handle specific logic.
-        // For POS, we usually require a selected outlet.
-        // For this task, strict validation implies we use the assigned outlet if available.
-        outletId = profile?.outlet_id;
+    userProfile = {
+        name: profile?.full_name || user.user_metadata?.full_name || 'Cashier',
+        email: user.email,
+        role: profile?.role || user.user_metadata?.role || 'Staff'
+    };
 
-        // If Owner (no outletId), we should arguably query based on a selected outlet context or just show 0 stock?
-        // Let's assume for POS view, if owner is viewing, they might need to pick outlet.
-        // BUT strict requirement says "filter product_stocks by the current user's outlet_id".
-        // If owner doesn't have one, we might fail to fetch stocks (show 0).
-        // Let's fallback to first outlet of tenant if implicit, OR strict empty.
-        // Prompt says: "Filter product_stocks by the current user's outlet_id".
-        // If null, we'll try to fetch ANY outlet link to show something (dev convenience) or stick to 0.
-        // I will stick to profile.outlet_id. If null, stocks will be 0.
-        if (!outletId && profile?.tenant_id) {
-            // Fallback for Owner without specific outlet: Get first outlet to show SOME data?
-            // Or maybe they can't operate POS without selecting one. 
-            // To prevent empty screen for Owner, let's grab the first outlet.
-            const { data: firstOutlet } = await supabase.from('outlets').select('id').eq('tenant_id', profile.tenant_id).limit(1).single();
-            if (firstOutlet) outletId = firstOutlet.id;
+    // 2. Determine Active Outlet (Logic Cascade)
+    const resolvedParams = await searchParams;
+    const paramOutletId = resolvedParams?.outletId;
+
+    let activeOutletId = outletId; // Default to Assigned
+
+    // If Owner, allow switching or default to first
+    if (isOwner) {
+        if (paramOutletId) {
+            activeOutletId = paramOutletId;
+        } else if (!activeOutletId) {
+            // If Owner has no assigned outlet and no param, fetch first available
+            const { data: firstOutlet } = await supabase
+                .from('outlets')
+                .select('id')
+                .eq('tenant_id', tenantId)
+                .limit(1)
+                .single();
+            if (firstOutlet) activeOutletId = firstOutlet.id;
         }
     }
 
-    // Fetch Categories
+    // 3. Fetch Outlets for Switcher (Owner Only needs to see them, but we fetch to pass to client)
+    const { data: outlets } = await supabase
+        .from('outlets')
+        .select('id, name')
+        .eq('tenant_id', tenantId)
+        .order('name');
+
+    // 4. Fetch Categories
     const { data: categories } = await supabase
         .from('categories')
         .select('id, name');
 
-    // 2. Fetch Products with Stocks
-    // Note: We explicitly filter by tenant_id on the product root to be safe,
-    // and by outlet_id on the joined resource to get the specific stock.
-
+    // 5. Fetch Products with Stocks (Filtered by Active Outlet)
     let productsQuery = supabase
         .from('products')
         .select(`
@@ -72,29 +92,27 @@ export default async function POSPage() {
                 name
             ),
             product_stocks (
-                quantity
+                quantity,
+                outlet_id
             )
         `)
-        // Filter products by tenant (good practice even if RLS exists)
         .eq('tenant_id', tenantId);
 
-    // Filter stock branch by outlet_id
-    if (outletId) {
-        productsQuery = productsQuery.eq('product_stocks.outlet_id', outletId);
+    // Filter stock branch by activeOutletId
+    if (activeOutletId) {
+        productsQuery = productsQuery.eq('product_stocks.outlet_id', activeOutletId);
+    } else {
+        // If no outlet context (e.g. brand new owner with no outlets), handle gracefully
+        // The join will result in empty stocks, which is fine (stock=0)
     }
 
     const { data: rawProducts, error: prodError } = await productsQuery;
-    console.log(rawProducts);
     if (prodError) console.error("POS Fetch Error:", prodError);
 
-    // 3. Transform Data (CRITICAL STEP)
-    // Map the raw data to a clean structure for the UI. 
-    // Handle cases where product_stocks might be an empty array.
+    // 6. Map Data
     const mappedProducts: (Product & { category: string })[] = (rawProducts || []).map((p: any) => {
-        // 1. Supabase returns stock as an array: [{ quantity: 5 }] or []
-        const stockEntry = p.product_stocks?.[0];
-
-        // 2. Safely extract quantity. If array is empty, default to 0.
+        // We filtered product_stocks by outlet_id in the query, so the array should contain THE specific stock or be empty.
+        const stockEntry = p.product_stocks?.[0]; // Should be only one
         const actualStock = stockEntry ? stockEntry.quantity : 0;
 
         return {
@@ -117,6 +135,8 @@ export default async function POSPage() {
             initialProducts={mappedProducts}
             categories={mappedCategories}
             user={userProfile}
+            outlets={outlets || []}
+            currentOutletId={activeOutletId || ''}
         />
     );
 }

@@ -25,7 +25,7 @@ const MENU_ITEMS = [
         ]
     },
     { icon: Users, label: "Customers", href: "/dashboard/customers" },
-    { icon: Users, label: "Staff", href: "/dashboard/staff" },
+    // { icon: Users, label: "Staff", href: "/dashboard/staff" },
     { icon: Settings, label: "Settings", href: "/dashboard/settings" },
 ];
 

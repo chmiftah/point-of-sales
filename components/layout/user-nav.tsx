@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
+import { useState, useEffect } from "react";
 import { User, LogOut, Settings, LayoutDashboard, Store } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -38,6 +39,26 @@ export function UserNav({ user }: UserNavProps) {
             .toUpperCase()
             .slice(0, 2)
         : "U";
+
+    // --- HYDRATION FIX ---
+    // UserNav often chokes on Radix ID generation during SSR.
+    // We defer rendering the dropdown until client-side mount.
+    const [isMounted, setIsMounted] = useState(false);
+    useEffect(() => setIsMounted(true), []);
+
+    if (!isMounted) {
+        // Render a static placeholder (skeleton) or just the button without dropdown trigger
+        return (
+            <Button variant="ghost" className="relative h-10 w-10 rounded-full hover:bg-white/10">
+                <Avatar className="h-10 w-10 border-2 border-white/10">
+                    <AvatarImage src={user.image} alt={user.name} />
+                    <AvatarFallback className="bg-gradient-to-tr from-indigo-500 to-purple-500 text-white font-bold">
+                        {initials}
+                    </AvatarFallback>
+                </Avatar>
+            </Button>
+        );
+    }
 
     return (
         <DropdownMenu>

@@ -8,9 +8,11 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useCartStore, Product } from '@/store/cartStore';
+import { CustomerSelector } from '@/components/pos/customer-selector';
 import { PaymentModal } from './payment-modal';
 import { formatRupiah, cn } from '@/lib/utils';
 import { UserNav } from '@/components/layout/user-nav';
+import { OutletSwitcher } from '@/components/pos/outlet-switcher';
 import Link from 'next/link';
 import {
     Sheet,
@@ -25,17 +27,25 @@ interface Category {
     name: string;
 }
 
+interface Outlet {
+    id: string;
+    name: string;
+}
+
 interface POSClientPageProps {
     initialProducts: (Product & { category: string })[];
     categories: Category[];
     user?: any;
+    outlets: Outlet[];
+    currentOutletId: string;
 }
 
-export default function POSClientPage({ initialProducts, categories, user }: POSClientPageProps) {
+export default function POSClientPage({ initialProducts, categories, user, outlets, currentOutletId }: POSClientPageProps) {
     const [selectedCategory, setSelectedCategory] = useState("All");
     const [searchQuery, setSearchQuery] = useState("");
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
     const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
+    const [selectedCustomer, setSelectedCustomer] = useState<{ id: string, name: string, phone: string | null } | null>(null);
 
     // --- BILLING STATE ---
     const [taxRate, setTaxRate] = useState(11);
@@ -116,6 +126,11 @@ export default function POSClientPage({ initialProducts, categories, user }: POS
                     )}
                 </div>
             </div>
+
+            <CustomerSelector
+                selectedCustomer={selectedCustomer}
+                onSelectCustomer={setSelectedCustomer}
+            />
 
             {/* Cart Items List */}
             <div className="flex-1 overflow-y-auto w-full p-4 space-y-3 min-h-0">
@@ -296,10 +311,16 @@ export default function POSClientPage({ initialProducts, categories, user }: POS
                         </h1>
                         <p className="text-[10px] text-slate-500 font-mono hidden md:block">Shift #302 • {currentTime}</p>
                     </div>
+
+
                 </div>
 
                 {/* Right Actions */}
                 <div className="flex items-center gap-2 md:gap-4">
+                    {/* Outlet Switcher (Owner Only) */}
+                    <div className="hidden md:block">
+                        <OutletSwitcher outlets={outlets} currentOutletId={currentOutletId} userRole={user?.role} />
+                    </div>
                     {/* Search removed from here, moved to content area */}
                     <Link href="/dashboard" className="hidden md:block">
                         <Button variant="ghost" size="sm" className="text-slate-500 hover:text-slate-900 gap-2 hover:bg-slate-100">
@@ -462,9 +483,11 @@ export default function POSClientPage({ initialProducts, categories, user }: POS
                 isOpen={isPaymentModalOpen}
                 onClose={() => setIsPaymentModalOpen(false)}
                 totalAmount={grandTotal}
+                selectedCustomer={selectedCustomer}
                 onConfirm={() => {
                     setIsPaymentModalOpen(false);
                     clearCart();
+                    setSelectedCustomer(null);
                 }}
             />
         </div>

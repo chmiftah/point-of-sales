@@ -20,6 +20,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { formatRupiah } from "@/lib/utils";
 import { createProduct, updateProduct, deleteProduct } from "../actions";
 
+import { OutletFilter } from "@/components/inventory/outlet-filter";
+
 interface Category {
     id: string;
     name: string;
@@ -38,7 +40,8 @@ interface Product {
 export default function ProductView({
     initialProducts,
     initialCategories,
-    pagination
+    pagination,
+    outletContext
 }: {
     initialProducts: Product[],
     initialCategories: Category[],
@@ -46,6 +49,11 @@ export default function ProductView({
         currentPage: number;
         totalPages: number;
         totalItems: number;
+    },
+    outletContext?: {
+        isOwner: boolean;
+        outlets: { id: string, name: string }[];
+        currentOutletId: string;
     }
 }) {
     const [products, setProducts] = useState(initialProducts);
@@ -107,6 +115,15 @@ export default function ProductView({
                         onChange={e => setSearchQuery(e.target.value)}
                     />
                 </div>
+
+                {/* {outletContext?.isOwner && (
+                    <div className="">
+                        <OutletFilter
+                            outlets={outletContext.outlets}
+                            currentOutletId={outletContext.currentOutletId}
+                        />
+                    </div>
+                )} */}
             </div>
 
             <Card className="border-slate-200 bg-white shadow-sm overflow-hidden">

@@ -10,6 +10,7 @@ import { Store, Users, Save, MapPin } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { OutletDialog } from "@/components/settings/outlet-dialog";
+import { StaffDialog } from "@/components/settings/staff-dialog";
 
 export default async function SettingsPage() {
     const supabase = await createClient();
@@ -18,7 +19,7 @@ export default async function SettingsPage() {
     if (!user) return <div>Unauthorized</div>;
 
     // 1. Fetch Tenant Info
-    const { data: profile } = await supabase.from('profiles').select('tenant_id').eq('id', user.id).single();
+    const { data: profile } = await supabase.from('profiles').select('tenant_id, outlet_id').eq('id', user.id).single();
 
     if (!profile?.tenant_id) return <div>No linked tenant found.</div>;
 
@@ -32,7 +33,9 @@ export default async function SettingsPage() {
     const { data: staff } = await supabase
         .from('profiles')
         .select('*')
-        .eq('tenant_id', profile.tenant_id);
+        .eq('tenant_id', profile.tenant_id)
+        .order('created_at', { ascending: true });
+
 
     // 3. Fetch Outlets
     const { data: outlets } = await supabase
@@ -148,7 +151,7 @@ export default async function SettingsPage() {
                                     Manage who has access to your store backend.
                                 </CardDescription>
                             </div>
-                            <Button variant="outline">Invite Staff (Pro)</Button>
+                            <StaffDialog outlets={outlets || []} />
                         </CardHeader>
                         <CardContent>
                             <Table>
