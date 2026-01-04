@@ -1,39 +1,82 @@
-"use client";
+import { createClient } from "@/lib/supabase/server";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { OutletDialog } from "@/components/settings/outlet-dialog";
+import { redirect } from "next/navigation";
 
-import { Button } from "@/components/ui/button";
-import { Plus, MapPin } from "lucide-react";
+export default async function SettingsOutletsPage() {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
 
-export default function OutletsPage() {
+    if (!user) redirect('/login');
+
+    const { data: profile } = await supabase.from('profiles').select('tenant_id, outlet_id').eq('id', user.id).single();
+
+    if (!profile?.tenant_id) return <div>No linked tenant found.</div>;
+
+    const { data: outlets } = await supabase
+        .from('outlets')
+        .select('*')
+        .eq('tenant_id', profile.tenant_id)
+        .order('created_at', { ascending: true });
+
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
-                <div>
-                    <h2 className="text-2xl font-bold tracking-tight">Outlet Settings</h2>
-                    <p className="text-muted-foreground">Manage your physical store locations.</p>
-                </div>
-                <Button className="gap-2"><Plus size={16} /> Add Outlet</Button>
+            <div>
+                <h2 className="text-3xl font-bold tracking-tight text-slate-900">Outlets</h2>
+                <p className="text-slate-500">Manage your physical store locations and branches.</p>
             </div>
 
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                <div className="glass p-6 rounded-xl border border-white/10 hover:border-primary/50 transition-colors cursor-pointer group relative overflow-hidden">
-                    <div className="absolute top-0 right-0 p-4 opacity-50"><MapPin size={48} /></div>
-                    <h3 className="text-xl font-bold mb-2">Main Branch</h3>
-                    <p className="text-muted-foreground text-sm mb-4">123 Coffee Street, NYC</p>
-                    <div className="flex gap-2">
-                        <span className="text-xs bg-green-500/10 text-green-500 px-2 py-1 rounded">Active</span>
-                        <span className="text-xs bg-blue-500/10 text-blue-500 px-2 py-1 rounded">HQ</span>
+            <Card className="border-slate-200 shadow-sm bg-white">
+                <CardHeader className="flex flex-row items-center justify-between">
+                    <div>
+                        <CardTitle>Outlets & Branches</CardTitle>
+                        <CardDescription>
+                            Manage your physical store locations.
+                        </CardDescription>
                     </div>
-                </div>
-
-                <div className="glass p-6 rounded-xl border border-white/10 hover:border-primary/50 transition-colors cursor-pointer group relative overflow-hidden">
-                    <div className="absolute top-0 right-0 p-4 opacity-50"><MapPin size={48} /></div>
-                    <h3 className="text-xl font-bold mb-2">Downtown Pop-up</h3>
-                    <p className="text-muted-foreground text-sm mb-4">456 Metro Station, NYC</p>
-                    <div className="flex gap-2">
-                        <span className="text-xs bg-green-500/10 text-green-500 px-2 py-1 rounded">Active</span>
-                    </div>
-                </div>
-            </div>
+                    <OutletDialog />
+                </CardHeader>
+                <CardContent>
+                    <Table>
+                        <TableHeader className="bg-slate-50">
+                            <TableRow>
+                                <TableHead>Outlet Name</TableHead>
+                                <TableHead>Address</TableHead>
+                                <TableHead>Phone</TableHead>
+                                <TableHead className="text-right">Actions</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {outlets?.map((outlet) => (
+                                <TableRow key={outlet.id} className="hover:bg-slate-50/50">
+                                    <TableCell className="font-medium text-slate-900">
+                                        {outlet.name}
+                                        {outlet.id === profile.outlet_id && <Badge variant="outline" className="ml-2 text-xs text-sky-600 border-sky-200 bg-sky-50">Current</Badge>}
+                                    </TableCell>
+                                    <TableCell className="text-slate-600 text-sm max-w-[300px] truncate">
+                                        {outlet.address || '-'}
+                                    </TableCell>
+                                    <TableCell className="text-slate-600">
+                                        {outlet.phone || '-'}
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                        <OutletDialog outlet={outlet} />
+                                    </TableCell>
+                                </TableRow>
+                            ))}
+                            {(!outlets || outlets.length === 0) && (
+                                <TableRow>
+                                    <TableCell colSpan={4} className="h-24 text-center text-slate-500">
+                                        No outlets found. Add your first branch.
+                                    </TableCell>
+                                </TableRow>
+                            )}
+                        </TableBody>
+                    </Table>
+                </CardContent>
+            </Card>
         </div>
     );
 }

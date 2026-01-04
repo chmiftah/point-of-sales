@@ -26,7 +26,15 @@ const MENU_ITEMS = [
     },
     { icon: Users, label: "Customers", href: "/dashboard/customers" },
     // { icon: Users, label: "Staff", href: "/dashboard/staff" },
-    { icon: Settings, label: "Settings", href: "/dashboard/settings" },
+    {
+        label: "Settings",
+        icon: Settings,
+        children: [
+            { label: "Store", href: "/dashboard/settings/store" },
+            { label: "Outlets", href: "/dashboard/settings/outlets" },
+            { label: "Staff", href: "/dashboard/settings/staff" },
+        ]
+    },
 ];
 
 export function AppSidebar() {
