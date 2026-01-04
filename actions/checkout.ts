@@ -4,37 +4,28 @@ import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 
 interface CheckoutItem {
-    id: string; // Product ID
+    id: string;
     quantity: number;
     price: number;
 }
 
-interface CheckoutResult {
-    success: boolean;
-    orderId?: string;
-    error?: string;
-}
-
-// UPDATE: Tambahkan parameter 'selectedOutletId'
 export async function checkoutAction(
     items: CheckoutItem[],
     totalAmount: number,
     paymentMethod: string,
     customerId?: string,
-    selectedOutletId?: string // <--- PARAMETER BARU (Opsional, wajib bagi Owner)
-): Promise<CheckoutResult> {
+    selectedOutletId?: string // <--- Parameter ke-5 yang dikirim dari PaymentModal
+) {
     const supabase = await createClient();
 
-    // 1. Get Current User
+    // 1. Cek User Login
     const { data: { user }, error: authError } = await supabase.auth.getUser();
-
     if (authError || !user) {
         return { success: false, error: 'Unauthorized: No active session' };
     }
 
     try {
-        // 2. Resolve Tenant & Profile
-        // Ambil juga kolom 'role' untuk pengecekan
+        // 2. Ambil Profile User untuk Cek Role & Tenant
         const { data: profile, error: profileError } = await supabase
             .from('profiles')
             .select('tenant_id, outlet_id, role')
@@ -42,55 +33,63 @@ export async function checkoutAction(
             .single();
 
         if (profileError || !profile) {
-            return { success: false, error: 'Authorization Error: Profile not found.' };
+            return { success: false, error: 'Profile not found.' };
         }
+
+        // --- DEBUGGING LOG (Lihat ini di Terminal VSCode Anda saat Transaksi) ---
+        console.log("DEBUG CHECKOUT:", {
+            userRoleDB: profile?.role,
+            inputOutletId: selectedOutletId,
+            profileOutletId: profile?.outlet_id,
+            isOwnerCheck: profile?.role === 'owner' // Check true/false
+        });
 
         const { tenant_id, role } = profile;
 
-        if (!tenant_id) {
-            return { success: false, error: 'Configuration Error: User has no Tenant.' };
+        // 3. TENTUKAN OUTLET ID (CRITICAL LOGIC)
+        // Default: Gunakan outlet_id milik user (ini untuk Staff/Kasir agar terkunci)
+        let finalOutletId = profile.outlet_id;
+
+        // JIKA OWNER:
+        // Kita izinkan Owner menggunakan 'selectedOutletId' yang dikirim dari Frontend (hasil pilihan di Switcher)
+        if (role === 'owner') {
+            if (selectedOutletId) {
+                finalOutletId = selectedOutletId;
+            } else {
+                // Fallback jika Owner tidak memilih (misal error frontend), kembalikan error atau pakai default
+                return { success: false, error: 'Owner wajib memilih Outlet aktif.' };
+            }
         }
 
-        // --- LOGIC PENENTUAN OUTLET ---
-        // Prioritize selectedOutletId (from UI/URL), fallback to profile.outlet_id (assigned outlet)
-        const targetOutletId = selectedOutletId || profile.outlet_id;
-
-        // if (role === 'owner') {
-        //    // Original strict logic removed based on user request to fallback
-        // }
-
-        console.log(selectedOutletId, targetOutletId)
-
-        // Final Validation
-        if (!targetOutletId) {
-            return { success: false, error: 'Transaction Error: Outlet ID is missing.' };
+        // Validasi Akhir
+        if (!finalOutletId) {
+            return { success: false, error: 'Outlet ID is missing or invalid.' };
         }
 
-        // --- PRE-FLIGHT STOCK CHECK ---
+        // --- MULAI TRANSAKSI ---
+
+        // 4. Validasi Stok (Opsional: Strict Mode)
+        // Kita gunakan finalOutletId untuk mengecek stok di cabang yang BENAR
         for (const item of items) {
             const { data: stockData } = await supabase
                 .from('product_stocks')
                 .select('quantity')
                 .eq('product_id', item.id)
-                .eq('outlet_id', targetOutletId) // <--- Gunakan targetOutletId
+                .eq('outlet_id', finalOutletId) // <--- Cek stok di outlet yang dipilih
                 .single();
 
             const currentQty = stockData?.quantity || 0;
-
-            // Uncomment baris ini jika ingin strict validation
-            // if (currentQty < item.quantity) {
-            //     return { success: false, error: `Stok habis untuk Item ID: ${item.id}. Sisa: ${currentQty}` };
-            // }
+            if (currentQty < item.quantity) {
+                return { success: false, error: `Stok tidak cukup untuk item ID: ${item.id} di outlet ini.` };
+            }
         }
 
-        // 3. Create Order
-        console.log("Creating Order with Outlet ID:", targetOutletId);
-
+        // 5. Buat Order
         const { data: order, error: orderError } = await supabase
             .from('orders')
             .insert({
                 tenant_id: tenant_id,
-                outlet_id: targetOutletId, // <--- Gunakan targetOutletId
+                outlet_id: finalOutletId, // <--- Simpan transaksi di outlet yang dipilih
                 customer_id: customerId || null,
                 total_amount: totalAmount,
                 payment_method: paymentMethod,
@@ -99,9 +98,9 @@ export async function checkoutAction(
             .select()
             .single();
 
-        if (orderError) throw new Error(`Order Creation Failed: ${orderError.message}`);
+        if (orderError) throw new Error(`Gagal membuat order: ${orderError.message}`);
 
-        // 4. Create Order Items
+        // 6. Simpan Item Order
         const orderItemsData = items.map(item => ({
             order_id: order.id,
             product_id: item.id,
@@ -115,31 +114,36 @@ export async function checkoutAction(
             .from('order_items')
             .insert(orderItemsData);
 
-        if (itemsError) throw new Error(`Order Items Failed: ${itemsError.message}`);
+        if (itemsError) throw new Error(`Gagal menyimpan item: ${itemsError.message}`);
 
-        // 5. Update Stock (Decrement)
+        // 7. Kurangi Stok (Decrement)
         for (const item of items) {
+            // Gunakan RPC atau Logic manual. Disini manual read-update untuk simplifikasi.
+            // Lebih aman menggunakan RPC 'decrement_stock' jika ada traffic tinggi.
             const { data: stock } = await supabase
                 .from('product_stocks')
                 .select('quantity')
                 .eq('product_id', item.id)
-                .eq('outlet_id', targetOutletId) // <--- Gunakan targetOutletId
+                .eq('outlet_id', finalOutletId)
                 .single();
 
             if (stock) {
                 const newQty = Math.max(0, stock.quantity - item.quantity);
                 await supabase
                     .from('product_stocks')
-                    .update({ quantity: newQty, updated_at: new Date().toISOString() })
+                    .update({
+                        quantity: newQty,
+                        updated_at: new Date().toISOString()
+                    })
                     .eq('product_id', item.id)
-                    .eq('outlet_id', targetOutletId); // <--- Gunakan targetOutletId
+                    .eq('outlet_id', finalOutletId); // <--- Update stok di outlet yang dipilih
             }
         }
 
-        // 6. Revalidate
-        revalidatePath('/dashboard');
+        // 8. Revalidate Cache
+        // Agar stok di halaman POS langsung update tanpa refresh manual
         revalidatePath('/pos');
-        revalidatePath('/dashboard/transactions');
+        revalidatePath('/dashboard');
 
         return { success: true, orderId: order.id };
 

@@ -46,5 +46,4 @@ export async function updateTenantProfile(formData: FormData) {
 
     revalidatePath('/dashboard');
     revalidatePath('/dashboard/settings');
-    return { success: true };
 }

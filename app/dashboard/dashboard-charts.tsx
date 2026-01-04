@@ -24,7 +24,7 @@ interface DashboardChartsProps {
 
 export function DashboardCharts({ revenueData, topProducts }: DashboardChartsProps) {
     return (
-        <div className="grid gap-4 md:grid-cols-7">
+        <div className="grid gap-4 ">
             <Card className="col-span-4 glass border-white/10">
                 <CardHeader>
                     <CardTitle>Overview</CardTitle>
@@ -58,27 +58,7 @@ export function DashboardCharts({ revenueData, topProducts }: DashboardChartsPro
                 </CardContent>
             </Card>
 
-            <Card className="col-span-3 glass border-white/10">
-                <CardHeader>
-                    <CardTitle>Top Products</CardTitle>
-                    <CardDescription>Best selling items.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <div className="space-y-8">
-                        {topProducts.length > 0 ? topProducts.map((item, i) => (
-                            <div key={i} className="flex items-center">
-                                <div className="ml-4 space-y-1">
-                                    <p className="text-sm font-medium leading-none">{item.name}</p>
-                                    <p className="text-sm text-muted-foreground">{item.sales} sales</p>
-                                </div>
-                                <div className="ml-auto font-medium">{formatRupiah(item.revenue)}</div>
-                            </div>
-                        )) : (
-                            <p className="text-muted-foreground text-sm">No sales data yet.</p>
-                        )}
-                    </div>
-                </CardContent>
-            </Card>
+
         </div>
     );
 }

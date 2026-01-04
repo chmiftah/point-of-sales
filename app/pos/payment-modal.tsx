@@ -1,6 +1,6 @@
 "use client";
 
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -78,11 +78,8 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, selected
     const [isLoading, setIsLoading] = useState(false);
 
     const handleProcessPayment = async () => {
-        console.log("Processing payment...", {
-            valid: isPaymentValid(),
-            method: paymentMethod,
-            outletId: currentOutletId
-        });
+
+
 
         if (!isPaymentValid()) return;
 
@@ -105,7 +102,7 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, selected
             };
             console.log("PAYMENT PAYLOAD:", payload);
 
-            const result = await checkoutAction(checkoutItems, totalAmount, paymentMethod, selectedCustomer?.id, currentOutletId);
+            const result = await checkoutAction(checkoutItems, totalAmount, paymentMethod, selectedCustomer?.id, currentOutletId || undefined);
 
             if (result.success) {
                 setIsSuccess(true);
@@ -147,6 +144,9 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, selected
         <Dialog open={isOpen} onOpenChange={(open) => !isSuccess && onClose()}>
             <DialogContent className="max-w-4xl p-0 gap-0 overflow-hidden border-white/10 glass-light text-foreground sm:rounded-3xl">
                 <DialogTitle className="sr-only">Pembayaran</DialogTitle>
+                <DialogDescription className="sr-only">
+                    Modal pembayaran untuk menyelesaikan transaksi.
+                </DialogDescription>
 
                 <AnimatePresence mode="wait">
                     {!isSuccess ? (

@@ -44,6 +44,40 @@ export async function createSupplier(formData: FormData) {
     return { success: true };
 }
 
+export async function updateSupplier(formData: FormData) {
+    const supabase = await createClient();
+
+    // 1. Server-Side Auth
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Unauthorized');
+
+    // 2. Fetch Truth from Profiles
+    // Although RLS usually handles tenant isolation, we double check here if needed or rely on RLS.
+    // Assuming RLS checks tenant_id matches user's linked tenant.
+
+    const id = formData.get('id') as string;
+    const name = formData.get('name') as string;
+    const phone = formData.get('phone') as string;
+    const email = formData.get('email') as string;
+    const address = formData.get('address') as string;
+
+    const { error } = await supabase
+        .from('suppliers')
+        .update({
+            name,
+            phone,
+            email,
+            address,
+            updated_at: new Date().toISOString()
+        })
+        .eq('id', id);
+
+    if (error) throw new Error(error.message);
+
+    revalidatePath('/dashboard/inventory/suppliers');
+    return { success: true };
+}
+
 export async function deleteSupplier(id: string) {
     const supabase = await createClient();
     // Ideally we should also check tenant ownership here if RLS is off, but sticking to requested scope.

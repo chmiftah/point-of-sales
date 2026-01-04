@@ -9,6 +9,7 @@ import Link from 'next/link';
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DashboardOutletFilter } from "@/components/dashboard/dashboard-outlet-filter";
+import { DashboardTopProducts } from '@/components/dashboard/dashboard-top-products';
 
 interface DashboardPageProps {
     searchParams: Promise<{ outletId?: string }>;
@@ -55,11 +56,20 @@ export default async function DashboardPage(props: DashboardPageProps) {
         availableOutlets = outlets || [];
     }
 
-    // 4. Fetch Contextual Metrics
-    const now = new Date();
-    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
-    let query = supabase
+
+    // ... (imports)
+
+    // ... (inside DashboardPage)
+
+    // 4. Fetch Contextual Metrics & Top Products Data
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString();
+
+    // --- QUERY 1: Orders (For KPI & Charts) ---
+    // reused existing query logic
+    let ordersQuery = supabase
         .from('orders')
         .select(`
             id, 
@@ -72,28 +82,83 @@ export default async function DashboardPage(props: DashboardPageProps) {
             )
         `)
         .eq('tenant_id', profile.tenant_id)
-        .gte('created_at', firstDayOfMonth)
+        .gte('created_at', startOfMonth)
         .order('created_at', { ascending: false });
 
-    // Apply Dynamic Filter
     if (targetOutletId) {
-        query = query.eq('outlet_id', targetOutletId);
+        ordersQuery = ordersQuery.eq('outlet_id', targetOutletId);
     }
 
-    const { data: orders, error } = await query;
-    if (error) console.error("Dashboard Error:", error);
+    const { data: orders, error: ordersError } = await ordersQuery;
+    if (ordersError) console.error("Orders Error:", ordersError);
 
-    // 5. Calculate KPIs
+
+    // --- QUERY 2: Top Products (Aggregation) ---
+    // Fetch raw items to aggregate in JS (Supabase has no easy 'group by' for relations yet)
+    let itemsQuery = supabase
+        .from('order_items')
+        .select(`
+            quantity,
+            price, 
+            product_id,
+            products (name, image_url, categories(name)),
+            orders!inner (status, created_at, outlet_id)
+        `)
+        .eq('tenant_id', profile.tenant_id)
+        .eq('orders.status', 'completed')
+        .gte('orders.created_at', startOfMonth)
+        .lte('orders.created_at', endOfMonth);
+
+    if (targetOutletId) {
+        itemsQuery = itemsQuery.eq('orders.outlet_id', targetOutletId);
+    }
+
+    const { data: orderItems, error: itemsError } = await itemsQuery;
+    if (itemsError) console.error("Top Products Error:", itemsError);
+
+    // --- AGGREGATION LOGIC ---
+    const productStats = new Map<string, {
+        id: string;
+        name: string;
+        image_url: string | null;
+        category: string;
+        totalSold: number;
+        totalRevenue: number;
+    }>();
+
+    if (orderItems) {
+        orderItems.forEach((item: any) => {
+            const pid = item.product_id;
+            const current = productStats.get(pid) || {
+                id: pid,
+                name: item.products?.name || 'Unknown',
+                image_url: item.products?.image_url || null,
+                category: item.products?.categories?.name || 'Uncategorized',
+                totalSold: 0,
+                totalRevenue: 0
+            };
+
+            current.totalSold += item.quantity;
+            current.totalRevenue += (item.quantity * item.price); // aggregated revenue for this item
+            productStats.set(pid, current);
+        });
+    }
+
+    const topProducts = Array.from(productStats.values())
+        .sort((a, b) => b.totalSold - a.totalSold) // Sort by Qty Descending
+        .slice(0, 5);
+
+
+    // ... (KPI Calculations reused from orders data) ...
     const validOrders = orders || [];
     const totalRevenue = validOrders.reduce((acc, curr) => acc + (curr.total_amount || 0), 0);
     const totalTransactions = validOrders.length;
     const avgOrderValue = totalTransactions > 0 ? totalRevenue / totalTransactions : 0;
-
     const totalItemsSold = validOrders.reduce((acc, order) => {
         return acc + (order.order_items?.reduce((s: number, i: any) => s + i.quantity, 0) || 0);
     }, 0);
 
-    // 6. Chart Data Prep
+    // Chart Data Prep
     const revenueByDate = new Map<string, number>();
     validOrders.forEach(order => {
         const date = new Date(order.created_at).toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
@@ -105,14 +170,7 @@ export default async function DashboardPage(props: DashboardPageProps) {
         .map(([name, total]) => ({ name, total }))
         .reverse();
 
-    const topProductsMock = [
-        { name: "Demo Product A", sales: 120, revenue: 5000000 },
-        { name: "Demo Product B", sales: 90, revenue: 3500000 },
-    ];
-
     const recentActivity = validOrders.slice(0, 5);
-
-    // Greeting Time
     const hour = new Date().getHours();
     const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 
@@ -129,7 +187,6 @@ export default async function DashboardPage(props: DashboardPageProps) {
                     </p>
                 </div>
                 <div className="flex items-center gap-2">
-                    {/* Render Filter for Owner, Badge for Staff */}
                     {isOwner ? (
                         <DashboardOutletFilter
                             outlets={availableOutlets}
@@ -142,7 +199,6 @@ export default async function DashboardPage(props: DashboardPageProps) {
                             {profile.outlets?.name || 'My Outlet'}
                         </Badge>
                     )}
-
                     <Button asChild>
                         <Link href="/pos">Open POS</Link>
                     </Button>
@@ -200,8 +256,15 @@ export default async function DashboardPage(props: DashboardPageProps) {
                 </Card>
             </div>
 
-            {/* Charts Section */}
-            <DashboardCharts revenueData={chartData} topProducts={topProductsMock} />
+            {/* Charts & Top Products Grid */}
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+                <div className="col-span-4">
+                    <DashboardCharts revenueData={chartData} topProducts={[]} />
+                </div>
+                <div className="col-span-3">
+                    <DashboardTopProducts products={topProducts} />
+                </div>
+            </div>
 
             {/* Recent Activity */}
             <Card className="glass border-white/10">
