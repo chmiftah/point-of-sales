@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Download, TrendingUp, CreditCard, ShoppingBag, DollarSign, Store } from "lucide-react";
 import { redirect } from "next/navigation";
 import Link from "next/link";
+import { DashboardOutletFilter } from "@/components/dashboard/dashboard-outlet-filter";
 
 interface ReportsPageProps {
     searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -24,30 +25,33 @@ export default async function ReportsPage(props: ReportsPageProps) {
 
     const { data: profile } = await supabase
         .from('profiles')
-        .select('tenant_id, outlet_id, role')
+        .select('tenant_id, outlet_id, role, full_name') // Added full_name just in case
         .eq('id', user.id)
         .single();
 
     if (!profile?.tenant_id) return <div className="p-8">Error: User has no tenant context.</div>;
 
     // 2. Determine Filter Scope
-    const isRestricted = !!profile.outlet_id;
-    const selectedOutletId = isRestricted
-        ? profile.outlet_id
-        : (searchParams.outletId as string | undefined);
+    const isOwner = profile.role === 'owner';
+    const paramsOutletId = searchParams.outletId as string;
 
-    // 3. Fetch Outlets (Owners Only)
-    // Only fetch if not restricted, to populate the filter
-    let outlets: { id: string; name: string }[] = [];
-    if (!isRestricted) {
+    let targetOutletId: string | null = null;
+    let availableOutlets: { id: string; name: string }[] = [];
+
+    if (isOwner) {
+        // Owner Logic
+        targetOutletId = (paramsOutletId === 'all' || !paramsOutletId) ? null : paramsOutletId;
         const { data } = await supabase
             .from('outlets')
             .select('id, name')
             .eq('tenant_id', profile.tenant_id);
-        outlets = data || [];
+        availableOutlets = data || [];
+    } else {
+        // Staff Logic
+        targetOutletId = profile.outlet_id;
     }
 
-    // 4. Fetch Sales Data (Orders)
+    // 3. Fetch Sales Data (Orders)
     // STRICT FILTERING
     let ordersQuery = supabase
         .from('orders')
@@ -55,22 +59,21 @@ export default async function ReportsPage(props: ReportsPageProps) {
         .eq('tenant_id', profile.tenant_id)
         .order('created_at', { ascending: true }); // Asc for Trend Chart
 
-    if (selectedOutletId) {
-        ordersQuery = ordersQuery.eq('outlet_id', selectedOutletId);
+    if (targetOutletId) {
+        ordersQuery = ordersQuery.eq('outlet_id', targetOutletId);
     }
 
     const { data: orders, error: ordersError } = await ordersQuery;
 
-    // 5. Fetch Audit Data (Shift Sessions) - Try/Catch/Partial
-    // Apply same strict logic
+    // 4. Fetch Audit Data (Shift Sessions) - Try/Catch/Partial
     let shiftQuery = supabase
-        .from('shift_sessions') // Table might not exist yet in schema
+        .from('shift_sessions')
         .select('*')
         .eq('tenant_id', profile.tenant_id)
         .order('started_at', { ascending: false });
 
-    if (selectedOutletId) {
-        shiftQuery = shiftQuery.eq('outlet_id', selectedOutletId);
+    if (targetOutletId) {
+        shiftQuery = shiftQuery.eq('outlet_id', targetOutletId);
     }
 
     const { data: shifts, error: shiftError } = await shiftQuery;
@@ -117,8 +120,11 @@ export default async function ReportsPage(props: ReportsPageProps) {
 
     // --- TITLE LOGIC ---
     let pageTitle = "Reports - All Outlets";
-    if (selectedOutletId) {
-        const outletName = outlets.find(o => o.id === selectedOutletId)?.name || "My Outlet";
+    if (targetOutletId) {
+        let outletName = "My Outlet"; // Fallback
+        if (isOwner) {
+            outletName = availableOutlets.find(o => o.id === targetOutletId)?.name || "Unknown Outlet";
+        }
         pageTitle = `Reports - ${outletName}`;
     }
 
@@ -132,47 +138,13 @@ export default async function ReportsPage(props: ReportsPageProps) {
                 </div>
                 <div className="flex items-center gap-2">
                     {/* Outlet Filter -> Only for Owner (Unrestricted) */}
-                    {!isRestricted && (
-                        <div className="w-[200px]">
-                            {/* We can't use Client Component Select easily directly in Server Component without wrapping. 
-                                For simplicity in this Server Page, we'll use a Link-based filter or just render the dropdown 
-                                (assuming it navigates or uses router.push/searchParams). 
-                                Actually, existing Select in previous code didn't do anything. 
-                                We should wrap this filter in a client component or make it a link list.
-                                For now, I'll render a simple Button Link or the existing Select if it was working client-side (it wasn't).
-                                Let's just create a list of links for now as a fallback or keep it static.
-                                
-                                BETTER: Use a client component 'OutletFilter' that syncs with URL searchParams.
-                                I'll inline a simple Link approach for now to be safe.
-                             */}
-                            <Button variant="outline" asChild>
-                                <Link href="/dashboard/reports">Clear Filter</Link>
-                            </Button>
-                        </div>
-                    )}
-                    {!isRestricted && outlets.length > 0 && (
-                        <Select defaultValue={selectedOutletId || "all"}>
-                            {/* Note: Real filtering needs client component to router.push(`?outletId=${val}`) */}
-                            {/* We will leave visuals but mark as 'Filter by URL' for now */}
-                            <SelectTrigger className="w-[180px]">
-                                <SelectValue placeholder="Filter Outlet" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">
-                                    <Link href="/dashboard/reports" className="w-full h-full block">All Outlets</Link>
-                                </SelectItem>
-                                {outlets.map(o => (
-                                    <SelectItem key={o.id} value={o.id}>
-                                        <Link href={`/dashboard/reports?outletId=${o.id}`} className="w-full h-full block">
-                                            {o.name}
-                                        </Link>
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                    )}
-
-                    {isRestricted && (
+                    {isOwner ? (
+                        <DashboardOutletFilter
+                            outlets={availableOutlets}
+                            userRole="owner"
+                            currentOutletId={targetOutletId}
+                        />
+                    ) : (
                         <div className="flex items-center gap-2 px-3 py-2 bg-muted rounded-md text-sm font-medium">
                             <Store size={16} />
                             Locked to Outlet

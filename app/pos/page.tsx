@@ -55,20 +55,20 @@ export default async function POSPage({
 
     let activeOutletId = outletId; // Default to Assigned
 
-    // If Owner, allow switching or default to first
-    if (isOwner) {
-        if (paramOutletId) {
-            activeOutletId = paramOutletId;
-        } else if (!activeOutletId) {
-            // If Owner has no assigned outlet and no param, fetch first available
-            const { data: firstOutlet } = await supabase
-                .from('outlets')
-                .select('id')
-                .eq('tenant_id', tenantId)
-                .limit(1)
-                .single();
-            if (firstOutlet) activeOutletId = firstOutlet.id;
-        }
+    // Priority 1: URL Param (if present)
+    if (paramOutletId) {
+        activeOutletId = paramOutletId;
+    }
+
+    // Priority 2: Fallback for Owner with no outlet (and no URL param)
+    if (isOwner && !activeOutletId) {
+        const { data: firstOutlet } = await supabase
+            .from('outlets')
+            .select('id')
+            .eq('tenant_id', tenantId)
+            .limit(1)
+            .single();
+        if (firstOutlet) activeOutletId = firstOutlet.id;
     }
 
     // 3. Fetch Outlets for Switcher (Owner Only needs to see them, but we fetch to pass to client)

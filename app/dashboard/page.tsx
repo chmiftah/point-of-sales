@@ -1,3 +1,4 @@
+
 import { createClient } from '@/lib/supabase/server';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatRupiah } from "@/lib/utils";
@@ -7,8 +8,14 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { DashboardOutletFilter } from "@/components/dashboard/dashboard-outlet-filter";
 
-export default async function DashboardPage() {
+interface DashboardPageProps {
+    searchParams: Promise<{ outletId?: string }>;
+}
+
+export default async function DashboardPage(props: DashboardPageProps) {
+    const searchParams = await props.searchParams;
     const supabase = await createClient();
 
     // 1. Authenticate & Identify
@@ -23,9 +30,32 @@ export default async function DashboardPage() {
 
     if (!profile) return <div className="p-8">Error: Profile not found. Contact support.</div>;
 
-    // 2. Fetch Contextual Metrics
-    // Scope: Tenant AND assigned Outlet
-    // Timeframe: Simple "This Month" filter (1st day of current month)
+    // 2. Determine Filter Scope
+    const isOwner = profile.role === 'owner';
+    const paramsOutletId = searchParams.outletId;
+
+    let targetOutletId: string | null = null;
+
+    if (isOwner) {
+        // Owner Logic: Use URL param, 'all' means null
+        targetOutletId = (paramsOutletId === 'all' || !paramsOutletId) ? null : paramsOutletId;
+    } else {
+        // Staff Logic: Locked to profile
+        targetOutletId = profile.outlet_id;
+    }
+
+    // 3. Fetch Outlets (Owner Only - for Switcher)
+    let availableOutlets: { id: string, name: string }[] = [];
+    if (isOwner) {
+        const { data: outlets } = await supabase
+            .from('outlets')
+            .select('id, name')
+            .eq('tenant_id', profile.tenant_id)
+            .order('name');
+        availableOutlets = outlets || [];
+    }
+
+    // 4. Fetch Contextual Metrics
     const now = new Date();
     const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
@@ -45,34 +75,25 @@ export default async function DashboardPage() {
         .gte('created_at', firstDayOfMonth)
         .order('created_at', { ascending: false });
 
-    if (profile.outlet_id) {
-        query = query.eq('outlet_id', profile.outlet_id);
-    } else {
-        // If no outlet assigned, maybe show nothing or all if admin?
-        // Prompt says "Strict User & Outlet Context". If no outlet, they shouldn't see data or they see all?
-        // Let's assume strict: if no outlet_id, and not "owner", show warning.
-        // But for safety/demo, if outlet_id is null/undefined in DB, maybe they are "Owner". 
-        // We will default to skipping the outlet filter IF strict mode allows. 
-        // Based on previous steps, let's keep it safe: Filter by outlet if it exists.
+    // Apply Dynamic Filter
+    if (targetOutletId) {
+        query = query.eq('outlet_id', targetOutletId);
     }
 
     const { data: orders, error } = await query;
     if (error) console.error("Dashboard Error:", error);
 
-    // 3. Calculate KPIs
+    // 5. Calculate KPIs
     const validOrders = orders || [];
     const totalRevenue = validOrders.reduce((acc, curr) => acc + (curr.total_amount || 0), 0);
     const totalTransactions = validOrders.length;
     const avgOrderValue = totalTransactions > 0 ? totalRevenue / totalTransactions : 0;
 
-    // Calculate Items Sold (approx)
-    // Note: order_items might be huge, so be careful. For now we fetched them.
     const totalItemsSold = validOrders.reduce((acc, order) => {
         return acc + (order.order_items?.reduce((s: number, i: any) => s + i.quantity, 0) || 0);
     }, 0);
 
-    // 4. Prepared Chart Data (Group by Day)
-    // Group orders by "DD MMM"
+    // 6. Chart Data Prep
     const revenueByDate = new Map<string, number>();
     validOrders.forEach(order => {
         const date = new Date(order.created_at).toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
@@ -80,41 +101,15 @@ export default async function DashboardPage() {
         revenueByDate.set(date, current + (order.total_amount || 0));
     });
 
-    // Convert to Array & Sort (simple sort by date string might fail, ideally sort by timestamp, but map iteration order is insertion order usually if sorted first)
-    // Since we fetched desc, we reverse for chart
     const chartData = Array.from(revenueByDate.entries())
         .map(([name, total]) => ({ name, total }))
         .reverse();
 
-    // 5. Top Products Logic (Simple aggregation in JS for MVP)
-    // In production, use RPC.
-    const productSales = new Map<string, { count: number, revenue: number }>();
-    // We need product names. We didn't fetch them in the main query to save bandwidth.
-    // We can fetch top selling via a separate RPC or just mock names if we don't have them in `order_items`.
-    // Actually, let's just show "Recent Activity" instead of top products if too complex without RPC.
-    // OR we fetch top products separately. 
-    // Let's fetch Top 5 Products separately.
-
-    // Alternative: Use the "Recents" logic requested in Prompt.
-    // Prompt asks for "Recent Activity (Bottom Row)".
-    // Charts section asks for "Revenue Trend".
-    // I will pass empty top products or implement a separate query.
-    // Let's try to get product names if possible.
-    // For now, I'll pass dummy Top Products since I can't easily aggregate names without joins matching huge data.
-    // Wait, I can fetch `order_items(..., products(name))` inside the query?
-    // Let's optimize. Too many joins might be slow.
-    // I will mock "Top Products" for now or use a separate small query if I have time. 
-    // Actually, I'll just stick to the requested "Revenue Trend" and "Recent Activity".
-    // I'll leave Top Products empty or mock it for UI completeness if the component expects it.
-    // I updated the component to accept it. Providing dummy for now to avoid breaking.
     const topProductsMock = [
         { name: "Demo Product A", sales: 120, revenue: 5000000 },
         { name: "Demo Product B", sales: 90, revenue: 3500000 },
     ];
 
-
-    // 6. Recent Activity (Last 5)
-    // We already have orders sorted desc. Take top 5.
     const recentActivity = validOrders.slice(0, 5);
 
     // Greeting Time
@@ -130,21 +125,24 @@ export default async function DashboardPage() {
                         {greeting}, {profile.full_name?.split(' ')[0] || 'User'} 👋
                     </h2>
                     <p className="text-muted-foreground">
-                        Here's what's happening at your outlet today.
+                        Here's what's happening at {targetOutletId ? 'this outlet' : 'all outlets'} today.
                     </p>
                 </div>
                 <div className="flex items-center gap-2">
-                    {profile.outlets ? (
+                    {/* Render Filter for Owner, Badge for Staff */}
+                    {isOwner ? (
+                        <DashboardOutletFilter
+                            outlets={availableOutlets}
+                            userRole="owner"
+                            currentOutletId={targetOutletId}
+                        />
+                    ) : (
                         <Badge variant="outline" className="h-9 px-4 text-sm gap-2 border-primary/20 bg-primary/5">
                             <Store size={14} className="text-primary" />
-                            {profile.outlets.name}
-                        </Badge>
-                    ) : (
-                        <Badge variant="outline" className="h-9 px-4 text-sm gap-2 bg-yellow-500/10 text-yellow-600 border-yellow-500/20">
-                            <Store size={14} />
-                            All Outlets
+                            {profile.outlets?.name || 'My Outlet'}
                         </Badge>
                     )}
+
                     <Button asChild>
                         <Link href="/pos">Open POS</Link>
                     </Button>

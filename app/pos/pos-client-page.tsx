@@ -46,7 +46,7 @@ export default function POSClientPage({ initialProducts, categories, user, outle
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
     const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
     const [selectedCustomer, setSelectedCustomer] = useState<{ id: string, name: string, phone: string | null } | null>(null);
-
+    // const [currentOutletId, setCurrentOutletId] = useState<string | null>(initialOutletId); // REMOVED: Use prop directly
     // --- BILLING STATE ---
     const [taxRate, setTaxRate] = useState(11);
     const [serviceRate, setServiceRate] = useState(0);
@@ -488,7 +488,9 @@ export default function POSClientPage({ initialProducts, categories, user, outle
                     setIsPaymentModalOpen(false);
                     clearCart();
                     setSelectedCustomer(null);
+                    // activeOutletId = { currentOutletId } // REMOVED: Incorrect assignment
                 }}
+                currentOutletId={currentOutletId}
             />
         </div>
     );

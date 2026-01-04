@@ -16,12 +16,13 @@ interface PaymentModalProps {
     totalAmount: number;
     onConfirm: () => void;
     selectedCustomer: { id: string, name: string } | null;
+    currentOutletId: string | null;
 }
 
 import { formatRupiah } from "@/lib/utils";
 import { checkoutAction } from "@/actions/checkout";
 
-export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, selectedCustomer }: PaymentModalProps) {
+export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, selectedCustomer, currentOutletId }: PaymentModalProps) {
     const { items } = useCartStore();
     const [paymentMethod, setPaymentMethod] = useState<'tunai' | 'kartu' | 'qris'>('tunai');
     const [amountTendered, setAmountTendered] = useState<number>(0);
@@ -77,6 +78,12 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, selected
     const [isLoading, setIsLoading] = useState(false);
 
     const handleProcessPayment = async () => {
+        console.log("Processing payment...", {
+            valid: isPaymentValid(),
+            method: paymentMethod,
+            outletId: currentOutletId
+        });
+
         if (!isPaymentValid()) return;
 
         setIsLoading(true);
@@ -89,7 +96,16 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, selected
                 price: i.price
             }));
 
-            const result = await checkoutAction(checkoutItems, totalAmount, paymentMethod, selectedCustomer?.id);
+            const payload = {
+                items: checkoutItems,
+                total: totalAmount,
+                method: paymentMethod,
+                customerId: selectedCustomer?.id,
+                outletId: currentOutletId
+            };
+            console.log("PAYMENT PAYLOAD:", payload);
+
+            const result = await checkoutAction(checkoutItems, totalAmount, paymentMethod, selectedCustomer?.id, currentOutletId);
 
             if (result.success) {
                 setIsSuccess(true);

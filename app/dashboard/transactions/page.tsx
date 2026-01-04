@@ -1,3 +1,4 @@
+
 import { createClient } from '@/lib/supabase/server';
 import { Button } from "@/components/ui/button";
 import { Download, CreditCard, TrendingUp, Activity } from "lucide-react";
@@ -5,11 +6,17 @@ import { formatRupiah } from "@/lib/utils";
 import { TransactionTable } from './transaction-table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { redirect } from 'next/navigation';
+import { DashboardOutletFilter } from "@/components/dashboard/dashboard-outlet-filter";
 
-export default async function TransactionsPage() {
+interface TransactionsPageProps {
+    searchParams: Promise<{ outletId?: string }>;
+}
+
+export default async function TransactionsPage(props: TransactionsPageProps) {
+    const searchParams = await props.searchParams;
     const supabase = await createClient();
 
-    // 1. Get User Profile for Context
+    // 1. Authenticate
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return redirect('/login');
 
@@ -18,10 +25,31 @@ export default async function TransactionsPage() {
         .select('*')
         .eq('id', user.id)
         .single();
-    console.log(profile);
+
     if (!profile) return <div>Profile not found. Please contact support.</div>;
 
-    // 2. Build Query with Strict RLS/Context Filters
+    // 2. Determine Filter Scope (Dynamic Logic)
+    const isOwner = profile.role === 'owner';
+    const paramsOutletId = searchParams.outletId;
+
+    let targetOutletId: string | null = null;
+    let availableOutlets: { id: string, name: string }[] = [];
+
+    if (isOwner) {
+        // Owner Logic: Use URL param, 'all' means null. Fetch available.
+        targetOutletId = (paramsOutletId === 'all' || !paramsOutletId) ? null : paramsOutletId;
+        const { data: outlets } = await supabase
+            .from('outlets')
+            .select('id, name')
+            .eq('tenant_id', profile.tenant_id)
+            .order('name');
+        availableOutlets = outlets || [];
+    } else {
+        // Staff Logic: Locked to profile
+        targetOutletId = profile.outlet_id;
+    }
+
+    // 3. Build Query with Strict RLS/Context Filters
     let query = supabase
         .from('orders')
         .select(`
@@ -38,45 +66,41 @@ export default async function TransactionsPage() {
         .order('created_at', { ascending: false })
         .limit(100);
 
-    // Apply Outlet Isolation if user is assigned to specific outlet
-    // (Assuming 'owner' role might exist later to bypass, but strictly following prompt for now)
-    if (profile.outlet_id) {
-        query = query.eq('outlet_id', profile.outlet_id);
+    // Apply Dynamic Filter
+    if (targetOutletId) {
+        query = query.eq('outlet_id', targetOutletId);
     }
 
     const { data: orders, error } = await query;
-
-    // 3. Fetch Available Outlets for Filter
-    // Only fetch outlets the user is allowed to see.
-    let outletsQuery = supabase
-        .from('outlets')
-        .select('id, name')
-        .eq('tenant_id', profile.tenant_id);
-
-    if (profile.outlet_id) {
-        outletsQuery = outletsQuery.eq('id', profile.outlet_id);
-    }
-
-    const { data: outlets } = await outletsQuery;
 
     // 4. Calculate Summary
     const totalRevenue = orders?.reduce((acc, curr) => acc + (curr.total_amount || 0), 0) || 0;
     const totalCount = orders?.length || 0;
     const avgTransaction = totalCount > 0 ? totalRevenue / totalCount : 0;
 
-    // Determine Page Title based on scope
-    const pageTitle = profile.outlet_id
-        ? `Transactions - ${outlets?.find(o => o.id === profile.outlet_id)?.name || 'My Outlet'}`
-        : "Transactions - All Outlets";
+    // Determine Page Title
+    const currentOutletName = isOwner
+        ? (targetOutletId ? availableOutlets.find(o => o.id === targetOutletId)?.name : "All Outlets")
+        : (profile.outlet_id ? "My Outlet" : "All Outlets");
+
+    const pageTitle = `Transactions - ${currentOutletName}`;
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
                 <div>
                     <h2 className="text-2xl font-bold tracking-tight">{pageTitle}</h2>
                     <p className="text-muted-foreground">Manage and track your financial records.</p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
+                    {/* Filter Integration */}
+                    {isOwner && (
+                        <DashboardOutletFilter
+                            outlets={availableOutlets}
+                            userRole="owner"
+                            currentOutletId={targetOutletId}
+                        />
+                    )}
                     <Button variant="outline" className="gap-2"><Download size={16} /> Export CSV</Button>
                 </div>
             </div>
@@ -124,7 +148,7 @@ export default async function TransactionsPage() {
             </div>
 
             {/* Client Side Table with Interactions */}
-            <TransactionTable initialOrders={orders || []} availableOutlets={outlets || []} />
+            <TransactionTable initialOrders={orders || []} availableOutlets={availableOutlets} />
         </div>
     );
 }
